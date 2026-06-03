@@ -62,6 +62,8 @@ if (Vulkan_FOUND)
     ggml_add_backend_library(ggml-vulkan
                              ggml-vulkan.cpp
                              ../../include/ggml-vulkan.h
+                             ../../include/vkRenderDocUtil.hpp
+                             ../../include/renderdoc_app.h
                             )
 
     set(VULKAN_SHADER_GEN_CMAKE_ARGS "")
