@@ -22,8 +22,6 @@ DispatchLoaderDynamic & ggml_vk_default_dispatcher();
 
 #include <vulkan/vulkan.hpp>
 
-#include "vkRenderDocUtil.hpp"
-
 // Fallback definitions for VK_NV_cooperative_matrix_decode_vector in case the
 // installed Vulkan headers predate the extension.
 #ifndef VK_NV_cooperative_matrix_decode_vector
@@ -2300,11 +2298,6 @@ struct vk_instance_t {
     std::vector<bool>   device_supports_membudget;
     vk_device devices[GGML_VK_MAX_DEVICES];
 };
-
-static RenderDocUtil* pRenderDocUtil;
-static bool renderdoc_initialized = false;
-static uint32_t currentGraphNum = 0;
-static uint32_t renderdoc_capture_node = 10;
 
 static bool vk_instance_initialized = false;
 static vk_instance_t vk_instance;
@@ -16272,13 +16265,6 @@ static ggml_status ggml_backend_vk_graph_compute(ggml_backend_t backend, ggml_cg
         vk_instance.pfn_vkQueueBeginDebugUtilsLabelEXT(ctx->device->compute_queue.queue, reinterpret_cast<VkDebugUtilsLabelEXT*>(&dul));
     }
 
-    currentGraphNum++;
-    // std::cout << "=== Graph Compute Start: " << currentGraphNum << " ===" << std::endl; 
-    if (currentGraphNum == renderdoc_capture_node) {
-        // std::cout << ">>> Starting RenderDoc capture at node " << currentGraphNum << std::endl;
-        pRenderDocUtil->startFrame();
-    }
-
     ctx->prealloc_size_add_rms_partials_offset = 0;
     ctx->do_add_rms_partials = false;
     ctx->do_add_rms_partials_offset_calculation = false;
@@ -16593,10 +16579,6 @@ static ggml_status ggml_backend_vk_graph_compute(ggml_backend_t backend, ggml_cg
         }
 
         if (enqueued) {
-            if (currentGraphNum == renderdoc_capture_node && submit_count == 1) {
-                // std::cout << ">>> Ending RenderDoc capture at node " << currentGraphNum << std::endl;
-                pRenderDocUtil->endFrame();
-            }
             ++submitted_nodes;
 
 #ifndef GGML_VULKAN_CHECK_RESULTS
@@ -16664,11 +16646,6 @@ static ggml_status ggml_backend_vk_graph_compute(ggml_backend_t backend, ggml_cg
         }
         ctx->perf_logger->print_timings();
     }
-
-    // if (currentGraphNum == renderdoc_capture_node) {
-    //     // std::cout << ">>> Ending RenderDoc capture at node " << currentGraphNum << std::endl;
-    //     pRenderDocUtil->endFrame();
-    // }
 
     if (!ctx->device->support_async) {
         ggml_vk_synchronize(ctx);
@@ -17017,11 +16994,6 @@ ggml_backend_t ggml_backend_vk_init(size_t dev_num) {
     VK_LOG_DEBUG("ggml_backend_vk_init(" << dev_num << ")");
 
     ggml_backend_vk_context * ctx = new ggml_backend_vk_context;
-
-    if (renderdoc_initialized == false) {
-        pRenderDocUtil        = new RenderDocUtil();
-        renderdoc_initialized = true;
-    }
 
     ggml_vk_init(ctx, dev_num);
 

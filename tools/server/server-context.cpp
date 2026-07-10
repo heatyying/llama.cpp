@@ -16,6 +16,7 @@
 #include "speculative.h"
 #include "mtmd.h"
 #include "mtmd-helper.h"
+#include "vkRenderDocUtil.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -919,6 +920,9 @@ private:
     int trace = 0;
     int slots_debug = 0;
     int n_empty_consecutive = 0;
+
+    std::unique_ptr<RenderDocUtil> renderdoc;
+    bool renderdoc_capture_done = false;
 
     std::unique_ptr<server_prompt_cache> prompt_cache;
 
@@ -3614,7 +3618,25 @@ private:
             n_empty_consecutive = 0;
         }
 
+        const bool capture_renderdoc =
+            !renderdoc_capture_done &&
+            params_base.renderdoc_token > 0 &&
+            slot_batched != nullptr &&
+            slot_batched->state == SLOT_STATE_GENERATING &&
+            slot_batched->n_decoded == params_base.renderdoc_token;
+        if (capture_renderdoc) {
+            if (!renderdoc) {
+                renderdoc = std::make_unique<RenderDocUtil>();
+            }
+            renderdoc->startFrame();
+        }
+
         const int ret = llama_decode(ctx_tgt, batch_view);
+
+        if (capture_renderdoc) {
+            renderdoc->endFrame();
+            renderdoc_capture_done = true;
+        }
 
         metrics.on_decoded(slots);
 
