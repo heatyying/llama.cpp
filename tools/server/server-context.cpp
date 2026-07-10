@@ -17,6 +17,7 @@
 #include "speculative.h"
 #include "mtmd.h"
 #include "mtmd-helper.h"
+#include "vkRenderDocUtil.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -1020,6 +1021,9 @@ private:
     int slots_n_diff = 0; // env: LLAMA_SERVER_SLOTS_N_DIFF
 
     int n_empty_consecutive = 0;
+
+    std::unique_ptr<RenderDocUtil> renderdoc;
+    bool renderdoc_capture_done = false;
 
     std::unique_ptr<server_prompt_cache> prompt_cache;
 
@@ -4178,6 +4182,19 @@ private:
             has_output |= batch.tokens[i].output;
         }
 
+        const bool capture_renderdoc =
+            !renderdoc_capture_done &&
+            params_base.renderdoc_token > 0 &&
+            batch.slot_batched != nullptr &&
+            batch.slot_batched->state == SLOT_STATE_GENERATING &&
+            batch.slot_batched->stats.n_gen == params_base.renderdoc_token;
+        if (capture_renderdoc) {
+            if (!renderdoc) {
+                renderdoc = std::make_unique<RenderDocUtil>();
+            }
+            renderdoc->startFrame();
+        }
+
         // yield to the queue, so we can still handle metrics tasks while decoding
         // note: the sync is done here too, so that the wait is also covered by the yield
         int ret = 0;
@@ -4187,6 +4204,11 @@ private:
                 llama_synchronize(ctx_tgt);
             }
         });
+
+        if (capture_renderdoc) {
+            renderdoc->endFrame();
+            renderdoc_capture_done = true;
+        }
 
         if (ret != 0) {
             {
