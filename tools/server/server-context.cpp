@@ -923,6 +923,9 @@ private:
 
     std::unique_ptr<RenderDocUtil> renderdoc;
     bool renderdoc_capture_done = false;
+    bool renderdoc_prefill_capture_active = false;
+    bool renderdoc_prefill_capture_done = false;
+    int32_t renderdoc_prefill_slot_id = -1;
 
     std::unique_ptr<server_prompt_cache> prompt_cache;
 
@@ -3619,6 +3622,7 @@ private:
         }
 
         const bool capture_renderdoc =
+            !renderdoc_prefill_capture_active &&
             !renderdoc_capture_done &&
             params_base.renderdoc_token > 0 &&
             slot_batched != nullptr &&
@@ -3631,11 +3635,53 @@ private:
             renderdoc->startFrame();
         }
 
+        const bool start_prefill_capture =
+            params_base.enable_prefill_capture &&
+            !renderdoc_prefill_capture_active &&
+            !renderdoc_prefill_capture_done &&
+            slot_batched != nullptr &&
+            (slot_batched->state == SLOT_STATE_PROCESSING_PROMPT ||
+             slot_batched->state == SLOT_STATE_DONE_PROMPT);
+        if (start_prefill_capture) {
+            if (!renderdoc) {
+                renderdoc = std::make_unique<RenderDocUtil>();
+            }
+            renderdoc->startFrame();
+            renderdoc_prefill_capture_active = true;
+            renderdoc_prefill_slot_id = slot_batched->id;
+            SRV_INF("RenderDoc prefill capture started: slot = %d, off = %d, n_tokens = %d\n",
+                    renderdoc_prefill_slot_id, off, batch_view.n_tokens);
+        }
+
+        server_slot * prefill_slot = nullptr;
+        if (renderdoc_prefill_capture_active) {
+            for (auto & slot : slots) {
+                if (slot.id == renderdoc_prefill_slot_id) {
+                    prefill_slot = &slot;
+                    break;
+                }
+            }
+        }
+
+        const bool end_prefill_capture =
+            prefill_slot != nullptr &&
+            prefill_slot->state == SLOT_STATE_DONE_PROMPT &&
+            prefill_slot->i_batch >= off &&
+            prefill_slot->i_batch < off + batch_view.n_tokens;
+
         const int ret = llama_decode(ctx_tgt, batch_view);
 
         if (capture_renderdoc) {
             renderdoc->endFrame();
             renderdoc_capture_done = true;
+        }
+
+        if (end_prefill_capture && ret == 0) {
+            renderdoc->endFrame();
+            renderdoc_prefill_capture_active = false;
+            renderdoc_prefill_capture_done = true;
+            SRV_INF("RenderDoc prefill capture ended: slot = %d, off = %d, n_tokens = %d\n",
+                    renderdoc_prefill_slot_id, off, batch_view.n_tokens);
         }
 
         metrics.on_decoded(slots);
